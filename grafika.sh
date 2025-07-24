@@ -5,17 +5,20 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <errno.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
-#include <drm.h>
-#include <drm_mode.h>
+#include <drm/drm.h>
+#include <drm/drm_mode.h>
 
 #define BMP_HEADER_SIZE 54
 
-// Funkcja do ładowania BMP (24-bit, bez kompresji)
 uint8_t* load_bmp(const char* path, int* width, int* height) {
     FILE* f = fopen(path, "rb");
-    if (!f) return NULL;
+    if (!f) {
+        perror("Nie można otworzyć pliku BMP");
+        return NULL;
+    }
 
     uint8_t header[BMP_HEADER_SIZE];
     fread(header, sizeof(uint8_t), BMP_HEADER_SIZE, f);
@@ -25,97 +28,65 @@ uint8_t* load_bmp(const char* path, int* width, int* height) {
 
     int row_padded = (*width * 3 + 3) & (~3);
     uint8_t* data = malloc(row_padded * (*height));
+    if (!data) {
+        fprintf(stderr, "Nie udało się zaalokować pamięci na dane BMP\n");
+        fclose(f);
+        return NULL;
+    }
 
     fseek(f, *(int*)&header[10], SEEK_SET);
     fread(data, sizeof(uint8_t), row_padded * (*height), f);
     fclose(f);
+
+    printf("Załadowano obraz BMP: %dx%d\n", *width, *height);
     return data;
 }
 
 int main() {
+    printf("[1] Otwieranie urządzenia DRM...\n");
     int fd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
     if (fd < 0) {
-        perror("open");
+        perror("open /dev/dri/card0");
+        return 1;
+    }
+    printf("    ✔️  Otworzono DRM\n");
+
+    drmModeRes *resources = drmModeGetResources(fd);
+    if (!resources) {
+        fprintf(stderr, "❌ Nie udało się pobrać zasobów DRM\n");
         return 1;
     }
 
-    drmModeRes *resources = drmModeGetResources(fd);
     drmModeConnector *connector = NULL;
-    drmModeEncoder *encoder = NULL;
     drmModeModeInfo mode;
-    uint32_t connector_id;
+    uint32_t connector_id = 0;
 
-    // Znajdź pierwszy podłączony connector
+    printf("[2] Szukanie podłączonego złącza...\n");
     for (int i = 0; i < resources->count_connectors; i++) {
         connector = drmModeGetConnector(fd, resources->connectors[i]);
-        if (connector->connection == DRM_MODE_CONNECTED && connector->count_modes > 0) {
+        if (connector && connector->connection == DRM_MODE_CONNECTED && connector->count_modes > 0) {
             connector_id = connector->connector_id;
             mode = connector->modes[0];
+            printf("    ✔️  Znaleziono podłączony ekran: %dx%d\n", mode.hdisplay, mode.vdisplay);
             break;
         }
         drmModeFreeConnector(connector);
     }
 
-    if (!connector) {
-        fprintf(stderr, "No connected connector found.\n");
+    if (!connector_id) {
+        fprintf(stderr, "❌ Nie znaleziono podłączonego złącza\n");
         return 1;
     }
 
-    // Utwórz dumb buffer
-    struct drm_mode_create_dumb creq = {
-        .width = mode.hdisplay,
-        .height = mode.vdisplay,
-        .bpp = 32,
-    };
-    drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &creq);
-
-    uint32_t handle = creq.handle;
-    uint32_t pitch = creq.pitch;
-    uint64_t size = creq.size;
-
-    struct drm_mode_map_dumb mreq = {.handle = handle};
-    drmIoctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq);
-
-    uint8_t* map = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, mreq.offset);
-    memset(map, 0, size); // Clear screen
-
-    struct drm_mode_fb_cmd fb = {
-        .width = mode.hdisplay,
-        .height = mode.vdisplay,
-        .pitch = pitch,
-        .bpp = 32,
-        .depth = 24,
-        .handle = handle,
-    };
-    drmIoctl(fd, DRM_IOCTL_MODE_ADDFB, &fb);
-
-    // Załaduj BMP
-    int bmp_w, bmp_h;
-    uint8_t* bmp_data = load_bmp("image.bmp", &bmp_w, &bmp_h);
-
-    // Kopiuj piksele (zakładamy: 24bpp BMP do 32bpp framebuffera)
-    for (int y = 0; y < bmp_h; y++) {
-        for (int x = 0; x < bmp_w; x++) {
-            int bmp_index = y * ((bmp_w * 3 + 3) & ~3) + x * 3;
-            int fb_index = (bmp_h - y - 1) * pitch + x * 4;
-
-            map[fb_index + 0] = bmp_data[bmp_index + 0]; // Blue
-            map[fb_index + 1] = bmp_data[bmp_index + 1]; // Green
-            map[fb_index + 2] = bmp_data[bmp_index + 2]; // Red
-            map[fb_index + 3] = 0; // Alpha (opcjonalnie)
-        }
+    drmModeEncoder *encoder = drmModeGetEncoder(fd, connector->encoder_id);
+    if (!encoder) {
+        fprintf(stderr, "❌ Nie udało się pobrać encodera\n");
+        return 1;
     }
 
-    // Ustaw CRTC
-    drmModeSetCrtc(fd, connector->encoder_id, fb.fb_id, 0, 0, &connector_id, 1, &mode);
+    uint32_t crtc_id = encoder->crtc_id;
 
-    sleep(5); // Zostaw obraz na ekranie przez 5 sekund
-
-    // Posprzątaj
-    munmap(map, size);
-    free(bmp_data);
-    drmModeFreeConnector(connector);
-    drmModeFreeResources(resources);
-    close(fd);
-    return 0;
-}
+    printf("[3] Tworzenie dumb buffer...\n");
+    struct drm_mode_create_dumb creq = {
+        .width = mode.hdisplay,
+        .height
