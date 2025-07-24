@@ -15,7 +15,7 @@
 #define DEVICE_PATH "/dev/dri/card1"  // 👈 Twój faktyczny GPU
 #define BMP_HEADER_SIZE 54
 
-// Wczytywanie BMP (24-bit RGB, bez kompresji)
+/*/ Wczytywanie BMP (24-bit RGB, bez kompresji)
 uint8_t* load_bmp(const char* path, int* width, int* height) {
     FILE* f = fopen(path, "rb");
     if (!f) {
@@ -42,7 +42,7 @@ uint8_t* load_bmp(const char* path, int* width, int* height) {
     fclose(f);
     return data;
 }
-
+*/
 int load_bmp(const char* filename, uint8_t** out_data, int* out_width, int* out_height) {
     FILE* f = fopen(filename, "rb");
     if (!f) {
@@ -107,9 +107,9 @@ void blit_bmp(uint8_t* fb, uint32_t fb_pitch, uint32_t fb_width, uint32_t fb_hei
 
 
 
-/----------------------------------------------
-/-------INT-MAIN()----------------------------
-/---------------------------------------------
+//----------------------------------------------
+//-------INT-MAIN()----------------------------
+//---------------------------------------------
 int main() {
     printf("Otwieram urządzenie DRM: %s\n", DEVICE_PATH);
     int fd = open(DEVICE_PATH, O_RDWR | O_CLOEXEC);
@@ -217,18 +217,19 @@ int main() {
 	free(bmp_data);
     
 	
-	// TEST: wypełnij ekran na czerwono
-    /for (int y = 0; y < mode.vdisplay; y++) {
-    /    for (int x = 0; x < mode.hdisplay; x++) {
-    /        int offset = y * creq.pitch + x * 4;
-    /        map[offset + 0] = 0x00; // Blue
-    /        map[offset + 1] = 0x00; // Green
-    /        map[offset + 2] = 0xFF; // Red
-    /        map[offset + 3] = 0x00;
-    /    }
-    /}
-    /printf("✔️ Ekran wypełniono czerwonym kolorem\n");
-    
+	/*/ TEST: wypełnij ekran na czerwono
+    for (int y = 0; y < mode.vdisplay; y++) {
+        for (int x = 0; x < mode.hdisplay; x++) {
+            int offset = y * creq.pitch + x * 4;
+            map[offset + 0] = 0x00; // Blue
+            map[offset + 1] = 0x00; // Green
+            map[offset + 2] = 0xFF; // Red
+            map[offset + 3] = 0x00;
+        }
+    }
+    printf("✔️ Ekran wypełniono czerwonym kolorem\n");
+    */
+	
     // Ustawienie CRTC
     if (drmModeSetCrtc(fd, crtc_id, fb.fb_id, 0, 0, &connector_id, 1, &mode) != 0) {
         perror("drmModeSetCrtc");
