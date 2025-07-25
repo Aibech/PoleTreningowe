@@ -87,25 +87,26 @@ int load_bmp(const char* filename, uint8_t** out_data, int* out_width, int* out_
     return 0;
 }
 
-void blit_bmp(uint8_t* fb, uint32_t fb_pitch, uint32_t fb_width, uint32_t fb_height,
-              uint8_t* bmp, int bmp_width, int bmp_height) {
-    int row_padded = (bmp_width * 3 + 3) & (~3);
+void blit_bmp_scaled(uint8_t* fb, uint32_t fb_pitch, uint32_t fb_width, uint32_t fb_height,
+                     uint8_t* bmp, int bmp_width, int bmp_height) {
+    int bmp_row_padded = (bmp_width * 3 + 3) & ~3;
 
-    for (int y = 0; y < bmp_height && y < fb_height; y++) {
-        for (int x = 0; x < bmp_width && x < fb_width; x++) {
-            int bmp_y = bmp_height - 1 - y;  // BMP is bottom-up
-            int bmp_offset = bmp_y * row_padded + x * 3;
+    for (uint32_t y = 0; y < fb_height; y++) {
+        int src_y = bmp_height - 1 - (y * bmp_height / fb_height);  // BMP bottom-up
+
+        for (uint32_t x = 0; x < fb_width; x++) {
+            int src_x = x * bmp_width / fb_width;
+
+            int bmp_offset = src_y * bmp_row_padded + src_x * 3;
             int fb_offset = y * fb_pitch + x * 4;
 
-            fb[fb_offset + 0] = bmp[bmp_offset + 0];  // Blue
-            fb[fb_offset + 1] = bmp[bmp_offset + 1];  // Green
-            fb[fb_offset + 2] = bmp[bmp_offset + 2];  // Red
-            fb[fb_offset + 3] = 0;
+            fb[fb_offset + 0] = bmp[bmp_offset + 0]; // Blue
+            fb[fb_offset + 1] = bmp[bmp_offset + 1]; // Green
+            fb[fb_offset + 2] = bmp[bmp_offset + 2]; // Red
+            fb[fb_offset + 3] = 0;                   // Alpha/Unused
         }
     }
 }
-
-
 
 //----------------------------------------------
 //-------INT-MAIN()----------------------------
@@ -210,11 +211,7 @@ int main() {
 		return 1;
 	}
 
-	// Wyświetl obrazek na ekran wersja  bez skali
-	//blit_bmp(map, creq.pitch, mode.hdisplay, mode.vdisplay,
-    //     bmp_data, bmp_width, bmp_height);
-
-
+	// Wyświetl obrazek na ekran wersja 
 	//Wersja z skalowaniem 25.07
 	blit_bmp_scaled(map, creq.pitch, mode.hdisplay, mode.vdisplay,
                 bmp_data, bmp_width, bmp_height);
