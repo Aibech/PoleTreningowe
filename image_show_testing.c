@@ -7,10 +7,10 @@
 //#include <sys/mman.h>
 #include <errno.h>
 
-#include <xf86drm.h>
-#include <xf86drmMode.h>
-#include <drm/drm.h>
-#include <drm/drm_mode.h>
+//#include <xf86drm.h>
+//#include <xf86drmMode.h>
+//#include <drm/drm.h>
+//#include <drm/drm_mode.h>
 
 #define DEVICE_PATH "/dev/dri/card1"  // 👈 Twój faktyczny GPU
 #define BMP_HEADER_SIZE 54

@@ -4,13 +4,13 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <sys/mman.h>
+//#include <sys/mman.h>
 #include <errno.h>
 
-#include <xf86drm.h>
-#include <xf86drmMode.h>
-#include <drm/drm.h>
-#include <drm/drm_mode.h>
+//#include <xf86drm.h>
+//#include <xf86drmMode.h>
+//#include <drm/drm.h>
+//#include <drm/drm_mode.h>
 
 #define DEVICE_PATH "/dev/dri/card1"  // 👈 Twój faktyczny GPU
 #define BMP_HEADER_SIZE 54
@@ -87,26 +87,31 @@ int load_bmp(const char* filename, uint8_t** out_data, int* out_width, int* out_
     return 0;
 }
 
-void blit_bmp_scaled(uint8_t* fb, uint32_t fb_pitch, uint32_t fb_width, uint32_t fb_height,
-                     uint8_t* bmp, int bmp_width, int bmp_height) {
+void blit_bmp_original_size(uint8_t* fb, uint32_t fb_pitch, uint32_t fb_width, uint32_t fb_height,
+                            uint8_t* bmp, int bmp_width, int bmp_height,
+                            int offset_x, int offset_y) {
     int bmp_row_padded = (bmp_width * 3 + 3) & ~3;
 
-    for (uint32_t y = 0; y < fb_height; y++) {
-        int src_y = bmp_height - 1 - (y * bmp_height / fb_height);  // BMP bottom-up
+    for (int y = 0; y < bmp_height; y++) {
+        int screen_y = offset_y + y;
+        if (screen_y >= (int)fb_height) break;
 
-        for (uint32_t x = 0; x < fb_width; x++) {
-            int src_x = x * bmp_width / fb_width;
+        for (int x = 0; x < bmp_width; x++) {
+            int screen_x = offset_x + x;
+            if (screen_x >= (int)fb_width) break;
 
-            int bmp_offset = src_y * bmp_row_padded + src_x * 3;
-            int fb_offset = y * fb_pitch + x * 4;
+            int bmp_y = bmp_height - 1 - y;  // BMP is bottom-up
+            int bmp_offset = bmp_y * bmp_row_padded + x * 3;
+            int fb_offset = screen_y * fb_pitch + screen_x * 4;
 
             fb[fb_offset + 0] = bmp[bmp_offset + 0]; // Blue
             fb[fb_offset + 1] = bmp[bmp_offset + 1]; // Green
             fb[fb_offset + 2] = bmp[bmp_offset + 2]; // Red
-            fb[fb_offset + 3] = 0;                   // Alpha/Unused
+            fb[fb_offset + 3] = 0;
         }
     }
 }
+
 
 //----------------------------------------------
 //-------INT-MAIN()----------------------------
@@ -213,8 +218,25 @@ int main() {
 
 	// Wyświetl obrazek na ekran wersja 
 	//Wersja z skalowaniem 25.07
-	blit_bmp_scaled(map, creq.pitch, mode.hdisplay, mode.vdisplay,
-                bmp_data, bmp_width, bmp_height);
+	
+	int offset_x = 0;
+int offset_y = 0;
+
+	if (bmp_width < mode.hdisplay && bmp_height < mode.vdisplay) {
+    // Wyśrodkuj jeśli obrazek jest mniejszy niż ekran
+    offset_x = (mode.hdisplay - bmp_width) / 2;
+    offset_y = (mode.vdisplay - bmp_height) / 2;
+    printf("Centrowanie obrazu: offset_x = %d, offset_y = %d\n", offset_x, offset_y);
+	} 
+	else {
+    // W przeciwnym wypadku pokaż od rogu
+			printf("Obraz równej wielkości jak ekran – wyświetlam od lewego górnego rogu\n");
+		}
+	
+	blit_bmp_original_size(map, creq.pitch,
+                       mode.hdisplay, mode.vdisplay,
+                       bmp_data, bmp_width, bmp_height,
+                       offset_x, offset_y);
 
 
 	free(bmp_data);
