@@ -11,6 +11,7 @@
 #include <xf86drmMode.h>
 #include <drm/drm.h>
 #include <drm/drm_mode.h>
+#include <signal.h>
 
 #define DEVICE_PATH "/dev/dri/card1"  //Your actual GPU, may it be diffrent ending e. g. .../card0
 #define BMP_HEADER_SIZE 54
@@ -18,7 +19,7 @@ int load_bmp(uint8_t** out_data, int* out_width, int* out_height) {
     uint8_t header[54];
     ssize_t total_read = 0;
 
-    // Czytaj nagłówek BMP (54 bajty)
+    // Reading BMP header (54 bajty)
     while (total_read < 54) {
         ssize_t r = read(STDIN_FILENO, header + total_read, 54 - total_read);
         if (r <= 0) {
@@ -119,16 +120,11 @@ void blit_bmp_original_size(uint8_t* fb, uint32_t fb_pitch, uint32_t fb_width, u
 int main(int argc, char *argv[]) {
     //Variables
    int opt;
-   char *image_path = NULL;
    int image_idle=0;
    //getopt loop
-   while((opt =getopt(argc,argv, "f:t:h")) != -1){
+   while((opt =getopt(argc,argv, "t:h")) != -1){
     switch (opt){
 
-    case 'f' :
-        printf("Input file is: %s\n",optarg);
-        image_path=strdup(optarg);
-        break;
     case 't':
         image_idle=atoi(optarg);
         printf("Image will be on screen for %d seconds\n",image_idle);
@@ -137,8 +133,7 @@ int main(int argc, char *argv[]) {
     case 'h':
     case '?': //Both options do the same operations
         printf("\nThis app is used for showing image on screen.\n");
-        printf("Format: ./app [ -f FILENAME ] [ -t TIME_ON_SCREEN_IN_SEC ] [ -h  ]\n");
-        printf("-f : Indicates path to the file which will be shown on a screen\n");
+        printf("Format: cat <path_to_image> | ./app [ -t TIME_ON_SCREEN_IN_SEC ] [ -h ]\n");
         printf("-t : Indicates how much time in seconds will be shown the image on screen.\n");
         printf("-h : Help about this app.\n");
         return 1;
@@ -146,6 +141,7 @@ int main(int argc, char *argv[]) {
     default:
         printf("Please add option -h at the end of the command\n");
         return 1;
+        break;
     }
 
    }
@@ -203,7 +199,7 @@ int main(int argc, char *argv[]) {
 
     // Creating dumb buffer
     struct drm_mode_create_dumb creq = {
-        .width = mode.hdisplay,     //small issue potentially change width with height to repair issue with non-square images, again changed to normal""
+        .width = mode.hdisplay,     
         .height = mode.vdisplay,
         .bpp = 32,
     };
@@ -215,7 +211,7 @@ int main(int argc, char *argv[]) {
 
     // Adding framebuffer
     struct drm_mode_fb_cmd fb = {
-        .width = mode.hdisplay,     //small issue potentially change width with height to repair issue with non-square images, again changed to normal""
+        .width = mode.hdisplay,     
         .height = mode.vdisplay,
         .pitch = creq.pitch,
         .bpp = 32,
@@ -243,20 +239,12 @@ int main(int argc, char *argv[]) {
 	// Load file BMP
 	uint8_t* bmp_data = NULL;
 	int bmp_width = 0, bmp_height = 0;
-    if (image_path !=NULL)
-    {
-        if (load_bmp(&bmp_data, &bmp_height, &bmp_width) != 0) {
-            fprintf(stderr, "Error during loading BMP\n");
-            return 1;
-        }
-    }
-	else {
-        printf("No -f option provided, reading BMP from stdin...\n");
-        if(load_bmp(&bmp_data, &bmp_height, &bmp_width) != 0){
+    
+    if(load_bmp(&bmp_data, &bmp_height, &bmp_width) != 0){
         fprintf(stderr, "Error during loading BMP\n");
         return 1;
         }
-    }
+    
 	     //Fill the screen with color
     for (int y = 0; y < mode.vdisplay; y++) {
         for (int x = 0; x < mode.hdisplay; x++) {
@@ -269,7 +257,7 @@ int main(int argc, char *argv[]) {
     }
 
 	//Show Image
-	// 25.07
+	//
 
 	int offset_x = 0;
 	int offset_y = 0;
@@ -314,6 +302,20 @@ int main(int argc, char *argv[]) {
     {
         sleep(image_idle);
     }
+    else
+    {
+        sigset_t sigset;
+        sigemptyset(&sigset);
+        sigaddset(&sigset, SIGINT);
+        sigaddset(&sigset, SIGTERM);
+        sigprocmask(SIG_BLOCK, &sigset, NULL);
+
+        int sig;
+        printf("Waiting for signal to end (Ctr+c)\n");
+        sigwait(&sigset, &sig);
+
+        printf("Signal has been received %d -ending the process.\n", sig);
+    }
     
 
     // Cleaning
@@ -322,6 +324,7 @@ int main(int argc, char *argv[]) {
     drmModeFreeConnector(connector);
     drmModeFreeResources(res);
     close(fd);
-    free(image_path);
     return 0;
 }
+
+
