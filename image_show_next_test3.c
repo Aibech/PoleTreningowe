@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
     switch (opt){
 
     case 'f' :
-        pritf("test");
+        printf("test");
         //printf("Input file is: %s\n",optarg);
         //image_path=strdup(optarg);
         break;

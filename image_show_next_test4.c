@@ -32,13 +32,13 @@ int load_bmp(const char* filename, uint8_t** out_data, int* out_width, int* out_
     uint8_t header[BMP_HEADER_SIZE];
     ssize_t bytes_read = read(fd, header, BMP_HEADER_SIZE);
     if (bytes_read != BMP_HEADER_SIZE) {
-        fprintf(stderr, "Nieprawidłowy nagłówek BMP\n");
+        fprintf(stderr, "Wrong BMP header.\n");
         if (fd != STDIN_FILENO) close(fd);
         return -1;
     }
 
     if (header[0] != 'B' || header[1] != 'M') {
-        fprintf(stderr, "To nie jest plik BMP\n");
+        fprintf(stderr, "It's not BMP file\n");
         if (fd != STDIN_FILENO) close(fd);
         return -1;
     }
@@ -49,7 +49,7 @@ int load_bmp(const char* filename, uint8_t** out_data, int* out_width, int* out_
     int bpp = *(short*)&header[28];
 
     if (bpp != 24) {
-        fprintf(stderr, "Obsługiwane są tylko BMP 24-bit\n");
+        fprintf(stderr, "Only BMP 24-bit\n");
         if (fd != STDIN_FILENO) close(fd);
         return -1;
     }
@@ -59,7 +59,7 @@ int load_bmp(const char* filename, uint8_t** out_data, int* out_width, int* out_
 
     uint8_t* data = malloc(data_size);
     if (!data) {
-        fprintf(stderr, "Brak pamięci\n");
+        fprintf(stderr, "No memory\n");
         if (fd != STDIN_FILENO) close(fd);
         return -1;
     }
@@ -79,7 +79,7 @@ int load_bmp(const char* filename, uint8_t** out_data, int* out_width, int* out_
             char tmp[128];
             int skip_now = to_skip > 128 ? 128 : to_skip;
             if (read(fd, tmp, skip_now) != skip_now) {
-                fprintf(stderr, "Nie udało się przeskoczyć nagłówka BMP (stdin)\n");
+                fprintf(stderr, "BMP header couldn't be read.(stdin)\n");
                 free(data);
                 return -1;
             }
@@ -88,7 +88,7 @@ int load_bmp(const char* filename, uint8_t** out_data, int* out_width, int* out_
     }
 
     if (read(fd, data, data_size) != data_size) {
-        fprintf(stderr, "Nie udało się odczytać danych BMP\n");
+        fprintf(stderr, "Can't read BMP data.\n");
         free(data);
         if (fd != STDIN_FILENO) close(fd);
         return -1;
@@ -137,7 +137,6 @@ int main(int argc, char *argv[]) {
    int opt;
    char *image_path = NULL;
    int image_idle=0;
-
    //getopt loop
    while((opt =getopt(argc,argv, "f:t:h")) != -1){
     switch (opt){
@@ -274,6 +273,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error during loading BMP\n");
         return 1;
         }
+    }
 	     //Fill the screen with color
     for (int y = 0; y < mode.vdisplay; y++) {
         for (int x = 0; x < mode.hdisplay; x++) {
