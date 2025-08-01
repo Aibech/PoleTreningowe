@@ -1,6 +1,6 @@
 #!/bin/sh
-LOGOAPP=./app
-LOGOPATH=./image.bmp.lzo
+
+LOGOPATH=/etc/logo.fb.lzo
 BOOTPART=/dev/mmcblk0p1
 UPGRPART=/dev/mmcblk0p2
 DATAPART=/dev/mmcblk0p3
@@ -96,7 +96,7 @@ function factory_upgrade {
 	fi
 }
 
-[ -s $LOGOPATH ] && lzopcat $LOGOPATH | $LOGOAPP
+[ -s $LOGOPATH ] && lzopcat $LOGOPATH > /dev/fb0
 
 e2fsck -y $BOOTPART
 e2fsck -y $UPGRPART
