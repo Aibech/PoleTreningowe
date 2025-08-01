@@ -1,0 +1,226 @@
+#!/bin/sh
+LOGOAPP=./app
+LOGOPATH=./image.bmp.lzo
+BOOTPART=/dev/mmcblk0p1
+UPGRPART=/dev/mmcblk0p2
+DATAPART=/dev/mmcblk0p3
+BOOTDIR=/mnt/boot
+ROOTDIR=/mnt/root
+UPGRDIR=/mnt/upgrade
+DATADIR=/mnt/data
+VALIDATENAME=hash.sha256
+VALIDATESIGN=hash.signature
+KEYPATH=/etc/key.pub
+
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+mount -t tmpfs /tmp
+
+function umount_all {
+	if [ -n "$1" ]; then
+		(mount | grep -q $UPGRDIR) && umount $UPGRDIR
+		(mount | grep -q $ROOTDIR) && umount $ROOTDIR
+		(mount | grep -q $BOOTDIR) && umount $BOOTDIR
+	fi
+	umount /tmp
+	umount /dev
+	umount /sys
+	umount /proc
+}
+
+function validate {
+	invalid=1
+	if [ -f $1/$VALIDATENAME ]; then
+		back=`pwd`
+		cd $1
+		if sha256sum -cs $VALIDATENAME && (openssl dgst -sha256 -verify $KEYPATH -signature $1/$VALIDATESIGN $1/$VALIDATENAME); then
+			invalid=0
+		fi
+		cd $back
+	fi
+	return $invalid
+}
+
+function wait_forever {
+	while true;
+		do sleep 1
+	done
+}
+
+function wait_reboot {
+	umount_all 1
+	reboot -f
+	wait_forever
+}
+
+function is_emergency {
+	grep -q emergency /proc/cmdline && return 0
+	return 1
+}
+
+function factory_recover {
+	if [ -f $BOOTDIR/.update-factory ]; then
+		echo "-- Updating factory firmware --"
+		if validate $BOOTDIR/firmware; then
+			rm -fr $BOOTDIR/factory
+			cp -R $BOOTDIR/firmware $BOOTDIR/factory
+			sync -f $BOOTDIR
+			if validate $BOOTDIR/factory; then
+				rm -f $BOOTDIR/.update-factory
+				sync -f $BOOTDIR
+				echo "-- Updating factory finished --"
+			else
+				wait_reboot
+			fi
+		else
+			echo "-- Updating factory FAILED! --"
+		fi
+	fi
+}
+
+function factory_upgrade_needed {
+	local factory_version=$(cat $BOOTDIR/factory/emergency-version 2>/dev/null || echo 0)
+	local firmware_version=$(cat $BOOTDIR/firmware/emergency-version 2>/dev/null || echo 0)
+	[ $firmware_version -gt $factory_version ] && return 0
+	return 1
+}
+
+function factory_upgrade {
+	# this function assumes that firmware is valid
+	if factory_upgrade_needed && factory_upgrade_needed && factory_upgrade_needed; then
+		# we want to make sure that we want to replace factory, so check 3 times
+		touch $BOOTDIR/.update-factory
+		sync -f $BOOTDIR
+		factory_recover
+	fi
+}
+
+[ -s $LOGOPATH ] && lzopcat $LOGOPATH | $LOGOAPP
+
+e2fsck -y $BOOTPART
+e2fsck -y $UPGRPART
+e2fsck -y $DATAPART
+
+mount -t ext4 $BOOTPART $BOOTDIR
+mount -t ext4 $UPGRPART $UPGRDIR
+
+factory_recover
+
+RESET=$(ls $UPGRDIR/reset_* 2>/dev/null)
+if [ ! -z "$RESET" ] && [ -f $RESET ]; then
+	echo "-- Reset data --"
+	mount -t ext4 $DATAPART $DATADIR
+	rm -fr $DATADIR/factory-reset-backup
+	if [ -s $RESET ]; then
+		while read -r line; do
+			[ -z "$line" ] && continue
+			echo "Backing up: $line"
+			backup=$DATADIR/factory-reset-backup/$(dirname $line)
+			mkdir -p $backup
+			cp -R $DATADIR/$line $backup
+		done < "$RESET"
+	fi
+	find $DATADIR -mindepth 1 -maxdepth 1 | grep -v lost+found | grep -v factory-reset-backup | xargs rm -fr
+	if [ -d $DATADIR/factory-reset-backup ]; then
+		echo -n "Restoring backup: "
+		cp -pR $DATADIR/factory-reset-backup/* $DATADIR 2>/dev/null
+		rm -fr $DATADIR/factory-reset-backup
+		echo "OK"
+	fi
+	umount $DATADIR
+	if (echo "$RESET" | grep -q "full"); then
+		echo "-- Reset firmware to factory version --"
+		rm -fr $BOOTDIR/firmware
+		rm -f $UPGRDIR/upgrade.signature
+		rm -f $UPGRDIR/upgraded.signature
+		cp -R $BOOTDIR/factory $BOOTDIR/firmware
+		rm -f $RESET
+		wait_reboot
+	else
+		rm -f $RESET
+	fi
+fi
+
+# remove unfinished upgrade files
+rm -f $UPGRDIR/.upgrade*
+is_emergency && rm -f $UPGRDIR/upgraded.signature
+
+UPGRPATH=$UPGRDIR/upgrade.tgz
+if [ -f $UPGRPATH ]; then
+	SIGNPATH=$UPGRDIR/upgrade.signature
+	UPGRADED_SIGNPATH=$UPGRDIR/upgraded.signature
+	if ( ! cmp -s $SIGNPATH $UPGRADED_SIGNPATH ); then
+		if [ ! -f $SIGNPATH ]; then
+			echo "Upgrade signature is missing"
+			rm -f $UPGRPATH
+		elif !(openssl dgst -sha256 -verify $KEYPATH -signature $SIGNPATH $UPGRPATH); then
+			echo "Invalid upgrade signature"
+			rm -f $UPGRPATH $SIGNPATH
+		else
+			echo "Upgrading firmware"
+			rm -fr $BOOTDIR/firmware/*
+			cd $BOOTDIR/firmware && gunzip -c $UPGRPATH | tar x 0/
+			mv 0/* . && rm -fr 0/
+			cat $SIGNPATH > $UPGRADED_SIGNPATH
+			echo "Upgrade complete"
+			wait_reboot
+		fi
+	fi
+fi
+
+umount $UPGRPART
+
+INVPATH=$BOOTDIR/firmware/invalid
+INVTRIALSPATH=$BOOTDIR/firmware/invalid-trials
+
+if is_emergency; then
+	validate $BOOTDIR/firmware
+	if [ $? -ne 0 ]; then
+		validate $BOOTDIR/factory
+		if [ $? -ne 0 ]; then
+			echo "Factory firmware is not valid!"
+			wait_reboot
+		fi
+		ROOTFSDIR=$BOOTDIR/factory
+	else
+		echo "System in the emergency mode, but looks like everything is fine"
+		rm -f $INVTRIALSPATH
+		rm -f $INVPATH
+		wait_reboot
+	fi
+else
+	validate $BOOTDIR/firmware
+	if [ $? -ne 0 ]; then
+		echo "Firmware is not valid"
+		TRIAL_COUNT=0
+		[ -f $INVTRIALSPATH ] && TRIAL_COUNT=$(head -n1 $INVTRIALSPATH)
+		(echo "$TRIAL_COUNT" | grep -qE '^[0-9]+$') || TRIAL_COUNT=0
+		TRIAL_COUNT=$((TRIAL_COUNT + 1))
+		if [ $TRIAL_COUNT -le 3 ]; then
+			mkdir -p $BOOTDIR/firmware
+			echo $TRIAL_COUNT > $INVTRIALSPATH
+		fi
+		if [ $TRIAL_COUNT -ge 3 ]; then
+			echo "Firmware failed validation 3 times, marking as invalid"
+			mkdir -p $BOOTDIR/firmware
+			touch $INVPATH
+		fi
+		wait_reboot
+	else
+		rm -f $INVTRIALSPATH
+		rm -f $INVPATH
+		factory_upgrade
+		ROOTFSDIR=$BOOTDIR/firmware
+	fi
+fi
+
+echo "Using $ROOTFSDIR firmware"
+if ! mount -t squashfs $ROOTFSDIR/rootfs.squashfs $ROOTDIR; then
+	echo "Failed to mount root filesystem!"
+	wait_reboot
+fi
+
+umount_all
+
+exec switch_root $ROOTDIR /sbin/init
